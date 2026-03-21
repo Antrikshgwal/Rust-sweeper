@@ -1,6 +1,6 @@
 use alloy::{
-    primitives::{address, Address, utils::{format_ether, format_units}},
-    providers::{Provider, ProviderBuilder},
+    primitives::{address, Address, utils::format_units},
+    providers::ProviderBuilder,
     sol,
 };
 use eyre::Result;
@@ -45,11 +45,11 @@ Ok(token_list)
 }
 
 
-pub async fn get_wallet_balance() -> Result<Vec<(String, u8)>> {
+pub async fn get_wallet_balance() -> Result<Vec<(String, String)>> {
 
     let target_address = address!("0xfEfE12bf26A2802ABEe59393B19b0704Fb274844");
 let token_list = get_token_list().unwrap();
-    let mut balances: Vec<(String, u8)> = Vec::new();
+    let mut balances: Vec<(String, String)> = Vec::new();
     for token in token_list.iter() {
         let balance = get_token_balance(token, target_address).await.unwrap();
         balances.push((token.name.clone(), balance));
@@ -57,7 +57,7 @@ let token_list = get_token_list().unwrap();
     Ok(balances)
 }
 
-pub async fn get_token_balance(token: &Token, target_address: Address) -> Result<u8> {
+pub async fn get_token_balance(token: &Token, target_address: Address) -> Result<String> {
 dotenv().ok();
    let rpc_url = env::var("SEPOLIA_RPC_URL")?.parse()?;
     let provider = ProviderBuilder::new().connect_http(rpc_url);
@@ -65,5 +65,5 @@ dotenv().ok();
  let token_address: Address = token.address;
         let contract = ERC20::new(token_address, provider.clone());
         let balance = format_units(contract.balanceOf(target_address).call().await?, token.decimals)?;
-Ok(balance.parse::<u8>()?)
+Ok(balance)
 }
