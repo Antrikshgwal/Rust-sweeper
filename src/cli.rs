@@ -1,8 +1,7 @@
-use clap::{Parser, Subcommand};
 use crate::get_balance::get_wallet_balance;
-use crate::swap::{swap, swap_all};
 use crate::shared::{Token, get_token_list};
 use alloy::primitives::{Address, U256, utils::format_units};
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "dust-sweep")]
@@ -42,7 +41,7 @@ pub enum Commands {
         #[arg(value_name = "WALLET_ADDRESS")]
         wallet_address: String,
 
-    /// Amount to swap (in token's smallest unit, e.g., 1000000 for 1 USDC)
+        /// Amount to swap (in token's smallest unit, e.g., 1000000 for 1 USDC)
         #[arg(short, long)]
         amount: U256,
 
@@ -73,7 +72,8 @@ pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
 
     match cli.command {
         Commands::Scan { wallet_address } => {
-            let addr: Address = wallet_address.parse()
+            let addr: Address = wallet_address
+                .parse()
                 .map_err(|_| eyre::eyre!("Invalid wallet address: {}", wallet_address))?;
 
             println!("Scanning wallet: {}", addr);
@@ -89,8 +89,14 @@ pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
             }
         }
 
-        Commands::Swap { wallet_address, amount, from, to } => {
-            let addr: Address = wallet_address.parse()
+        Commands::Swap {
+            wallet_address,
+            amount,
+            from,
+            to,
+        } => {
+            let addr: Address = wallet_address
+                .parse()
                 .map_err(|_| eyre::eyre!("Invalid wallet address: {}", wallet_address))?;
 
             let token_in = find_token_by_symbol(&from)?;
@@ -99,12 +105,11 @@ pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
             println!("Wallet: {}", addr);
             println!("Chain: {}", cli.chain);
             println!("Swapping {} → {}\n", token_in.name, token_out.name);
-            
-            swap(addr, amount, token_in, token_out).await?;
         }
 
         Commands::Sweep { wallet_address, to } => {
-            let addr: Address = wallet_address.parse()
+            let addr: Address = wallet_address
+                .parse()
                 .map_err(|_| eyre::eyre!("Invalid wallet address: {}", wallet_address))?;
 
             let target = find_token_by_symbol(&to)?;
@@ -112,8 +117,6 @@ pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
             println!("Wallet: {}", addr);
             println!("Chain: {}", cli.chain);
             println!("Sweeping all dust to {}\n", target.name);
-
-            swap_all(addr, target).await?;
         }
     }
 

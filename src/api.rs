@@ -6,14 +6,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
-use alloy::primitives::{Address, U256};
+use alloy::primitives::{Address, U256, Bytes};
 use eyre::Result;
 
 use crate::{
     get_balance::get_wallet_balance,
     shared::{Token, get_token_list},
 };
-use crate::swap::{swap,swap_all};
+use crate::swap::{get_swap_calldata, get_swap_all_calldata, broadcast_transaction};
 
 #[derive(Deserialize)]
 pub struct ScanRequest {
@@ -41,7 +41,8 @@ pub struct ScanResponse {
 
 #[derive(Serialize)]
 pub struct SwapResponse {
-    tx_receipt: String,
+    to: String,
+    calldata: String,
 }
 
 #[derive(Deserialize)]
@@ -52,10 +53,8 @@ pub struct SweepRequest {
 
 #[derive(Serialize)]
 pub struct SweepResponse {
-    sweeper_address: String,
-    target_token: String,
-    tokens_to_sweep: Vec<String>,
-    amounts_to_sweep: Vec<String>,
+    to: String,
+    calldata: String,
     approvals_needed: Vec<ApprovalNeeded>,
 }
 
@@ -63,8 +62,18 @@ pub struct SweepResponse {
 pub struct ApprovalNeeded {
     token_address: String,
     token_name: String,
-    current_allowance: String,
-    needed_amount: String,
+    spender: String,
+    amount: String,
+}
+
+#[derive(Deserialize)]
+pub struct BroadcastRequest {
+    signed_tx: String,
+}
+
+#[derive(Serialize)]
+pub struct BroadcastResponse {
+    tx_hash: String,
 }
 
 // Scan endpoint - returns token balances
@@ -115,11 +124,12 @@ async fn swap_handler(
     let amount_in: U256 = payload.amount_in.parse()
         .map_err(|_| "Invalid amount".to_string())?;
 
-    let tx_receipt = swap(wallet_address, amount_in, token_in.clone(), token_out.clone()).await
+    let (to, calldata) = get_swap_calldata(wallet_address, amount_in, token_in.clone(), token_out.clone()).await
         .map_err(|e| format!("Swap failed: {}", e))?;
 
     Ok(Json(SwapResponse {
-        tx_receipt: format!("{:?}", tx_receipt),
+        to: to.to_string(),
+        calldata: calldata.to_string(),
     }))
 }
 // Sweep endpoint - returns data needed for frontend to execute sweep
@@ -154,12 +164,10 @@ async fn sweep_handler(
         })
         .collect::<Vec<(Token, U256)>>();
 
-    let mut tokens_to_sweep = Vec::new();
-    let mut amounts_to_sweep = Vec::new();
     let mut approvals_needed = Vec::new();
 
     // Check allowances
-    for (token, balance) in dust_tokens {
+    for (token, balance) in &dust_tokens {
         let provider = get_provider().await
             .map_err(|e| format!("Provider error: {}", e))?;
         let token_contract = IERC20::new(token.address, provider);
@@ -170,26 +178,36 @@ async fn sweep_handler(
             .await
             .map_err(|e| format!("Allowance check failed: {}", e))?;
 
-        if current_allowance < balance {
+        if current_allowance < *balance {
             approvals_needed.push(ApprovalNeeded {
                 token_address: format!("{:?}", token.address),
                 token_name: token.name.clone(),
-                current_allowance: current_allowance.to_string(),
-                needed_amount: balance.to_string(),
+                spender: format!("{:?}", sweeper_address),
+                amount: U256::MAX.to_string(),
             });
         }
-
-        tokens_to_sweep.push(format!("{:?}", token.address));
-        amounts_to_sweep.push(balance.to_string());
     }
 
+    let (to, calldata) = get_swap_all_calldata(wallet_address, target_token.clone()).await
+        .map_err(|e| format!("Failed to get calldata: {}", e))?;
+
     Ok(Json(SweepResponse {
-        sweeper_address: format!("{:?}", sweeper_address),
-        target_token: format!("{:?}", target_token.address),
-        tokens_to_sweep,
-        amounts_to_sweep,
+        to: to.to_string(),
+        calldata: calldata.to_string(),
         approvals_needed,
     }))
+}
+
+async fn broadcast_handler(
+    Json(payload): Json<BroadcastRequest>,
+) -> Result<Json<BroadcastResponse>, String> {
+    let signed_tx: Bytes = payload.signed_tx.parse()
+        .map_err(|_| "Invalid signed transaction".to_string())?;
+
+    let tx_hash = broadcast_transaction(signed_tx).await
+        .map_err(|e| format!("Failed to broadcast transaction: {}", e))?;
+
+    Ok(Json(BroadcastResponse { tx_hash }))
 }
 
 pub async fn start_server() -> Result<()> {
@@ -199,25 +217,18 @@ pub async fn start_server() -> Result<()> {
         .allow_methods([Method::GET, Method::POST])
         .allow_headers(Any);
 
+    // Router
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
         .route("/scan", post(scan_handler))
-        .route("/sweep", post(sweep_handler))
         .route("/swap", post(swap_handler))
+        .route("/sweep", post(sweep_handler))
+        .route("/broadcast", post(broadcast_handler))
         .layer(cors);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001")
-        .await
-        .unwrap();
-
-    println!("🚀 API Server running on http://localhost:3001");
-    println!("📝 Endpoints:");
-    println!("   GET  /health");
-    println!("   POST /scan");
-    println!("   POST /swap");
-    println!("   POST /sweep");
-
-    axum::serve(listener, app).await.unwrap();
+    // Start server
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await?;
+    axum::serve(listener, app).await?;
 
     Ok(())
 }

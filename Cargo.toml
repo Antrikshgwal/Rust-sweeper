@@ -15,4 +15,5 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 clap = "4.6.0"
 axum = "0.8.8"
 tower-http = { version = "0.5", features = ["cors"] }
+url = { version = "2.5.8", features = ["serde"] }
 
