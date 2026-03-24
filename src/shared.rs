@@ -52,4 +52,10 @@ token_list.push(Token {
 Ok(token_list)
 }
 
+pub async fn get_default()-> Result<Token> {
+    let tokens = get_token_list()?;
+    let default_token = tokens.into_iter().find(|t| t.name == "USDC").ok_or_else(|| eyre::eyre!("Default token not found"))?;
+    Ok(default_token)
+}
+
 
