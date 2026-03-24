@@ -1,11 +1,16 @@
-mod get_balance;
-mod swap;
-mod shared;
+use crate::shared::Token;
+use clap::{Parser, Subcommand};
+
 mod cli;
+mod get_balance;
+mod shared;
+mod swap;
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = cli::CLI() {
-        eprintln!("Error: {}", e);
+    let cli = cli::Cli::parse();
+
+    if let Err(e) = cli::run_cli(cli).await {
+        eprintln!("Error: {:?}", e);
     }
 }

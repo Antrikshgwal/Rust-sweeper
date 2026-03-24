@@ -1,34 +1,54 @@
 use clap::{Parser, Subcommand};
 use crate::get_balance::get_wallet_balance;
 use crate::swap::{swap, swap_all};
-use crate::shared::{Token, get_token_list, get_default};
-use alloy::primitives::{Address, U256};
+use crate::shared::{Token, get_token_list};
+use alloy::primitives::{Address, U256, utils::format_units};
 
 #[derive(Parser)]
 #[command(name = "dust-sweep")]
 #[command(about = "Sweep token dust into a single token", long_about = None)]
-struct Cli {
+pub struct Cli {
+    /// Chain to use (currently only sepolia supported)
+    #[arg(short, long, default_value = "sepolia")]
+    pub chain: String,
+
     #[command(subcommand)]
-    command: Commands,
+    pub command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Commands {
+pub enum Commands {
     /// Scan wallet for token balances
-    Scan,
+    Scan {
+        /// Wallet address to scan
+        #[arg(value_name = "WALLET_ADDRESS")]
+        wallet_address: String,
+    },
+
     /// Sweep all dust tokens into target token
     Sweep {
+        /// Wallet address to sweep from
+        #[arg(value_name = "WALLET_ADDRESS")]
+        wallet_address: String,
+
         /// Target token symbol (e.g., USDC, USDT, WETH)
-        #[arg(short, long)]
-        to: Option<String>,
+        #[arg(short, long, default_value = "USDC")]
+        to: String,
     },
+
+    /// Swap one token for another
     Swap {
+        /// Wallet address to swap from
+        #[arg(value_name = "WALLET_ADDRESS")]
+        wallet_address: String,
+
         /// Token symbol to swap from (e.g., WETH, USDT)
         #[arg(short, long)]
-        from: Option<String>,
+        from: String,
+
         /// Token symbol to swap to (e.g., USDC)
         #[arg(short, long)]
-        to: Option<String>,
+        to: String,
     },
 }
 
@@ -41,42 +61,55 @@ fn find_token_by_symbol(symbol: &str) -> eyre::Result<Token> {
         .ok_or_else(|| eyre::eyre!("Token '{}' not found. Available: USDC, USDT, WETH", symbol))
 }
 
-#[tokio::main]
-pub async fn CLI() -> eyre::Result<()> {
-    let cli = Cli::parse();
-    let wallet = crate::shared::get_wallet().await?;
-    let wallet_address = wallet.default_signer().address();
+pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
+    // Validate chain
+    if cli.chain != "sepolia" {
+        return Err(eyre::eyre!("Currently only 'sepolia' chain is supported"));
+    }
 
     match cli.command {
-        Commands::Scan => {
-            let balances = get_wallet_balance(wallet_address).await?;
+        Commands::Scan { wallet_address } => {
+            let addr: Address = wallet_address.parse()
+                .map_err(|_| eyre::eyre!("Invalid wallet address: {}", wallet_address))?;
+
+            println!("Scanning wallet: {}", addr);
+            println!("Chain: {}\n", cli.chain);
+
+            let balances = get_wallet_balance(addr).await?;
             println!("Token Balances:");
             for (token, balance) in balances {
                 if balance > U256::ZERO {
-                    println!("  {}: {}", token.name, balance);
+                    let formatted = format_units(balance, token.decimals)?;
+                    println!("  {}: {}", token.name, formatted);
                 }
             }
         }
-        Commands::Swap { to, from } => {
-            let token_in: Token = match from {
-                Some(symbol) => find_token_by_symbol(&symbol)?,
-                None => get_default().await?,
-            };
 
-            let token_out: Token = match to {
-                Some(symbol) => find_token_by_symbol(&symbol)?,
-                None => get_default().await?,
-            };
+        Commands::Swap { wallet_address, from, to } => {
+            let addr: Address = wallet_address.parse()
+                .map_err(|_| eyre::eyre!("Invalid wallet address: {}", wallet_address))?;
 
-            swap(token_in, token_out).await?;
+            let token_in = find_token_by_symbol(&from)?;
+            let token_out = find_token_by_symbol(&to)?;
+
+            println!("Wallet: {}", addr);
+            println!("Chain: {}", cli.chain);
+            println!("Swapping {} → {}\n", token_in.name, token_out.name);
+
+            swap(addr, token_in, token_out).await?;
         }
-        Commands::Sweep { to } => {
-            let target = match to {
-                Some(symbol) => find_token_by_symbol(&symbol)?,
-                None => get_default().await?,
-            };
 
-            swap_all(target).await?;
+        Commands::Sweep { wallet_address, to } => {
+            let addr: Address = wallet_address.parse()
+                .map_err(|_| eyre::eyre!("Invalid wallet address: {}", wallet_address))?;
+
+            let target = find_token_by_symbol(&to)?;
+
+            println!("Wallet: {}", addr);
+            println!("Chain: {}", cli.chain);
+            println!("Sweeping all dust to {}\n", target.name);
+
+            swap_all(addr, target).await?;
         }
     }
 

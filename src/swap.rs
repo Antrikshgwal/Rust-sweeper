@@ -5,7 +5,7 @@ use alloy::{
 };
 use dotenv::dotenv;
 use eyre::Result;
-use crate::shared::{get_provider, get_wallet, Token, get_token_list};
+use crate::shared::{get_provider, get_wallet, Token};
 
 use crate::get_balance::{get_token_balance, get_wallet_balance};
 
@@ -52,12 +52,9 @@ sol! {
 }
 
 
-pub async fn swap_all(target_token: Token) -> Result<()> {
+pub async fn swap_all(wallet_address: Address, target_token: Token) -> Result<()> {
     dotenv().ok();
 
-    let wallet = get_wallet().await?;
-
-    let wallet_address = wallet.default_signer().address();
     let router_address = address!("0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3"); // Sepolia V2 Router
     let multicall_address = address!("0xcA11bde05977b3631167028862bE2a173976CA11"); // Multicall3
 
@@ -138,13 +135,10 @@ pub async fn swap_all(target_token: Token) -> Result<()> {
 
     Ok(())
 }
-pub async fn swap(token_in: Token, token_out: Token) -> Result<String> {
+pub async fn swap(wallet_address: Address, token_in: Token, token_out: Token) -> Result<String> {
     dotenv().ok();
 
-    // ========= Fetch Wallet and Router ========
-
-    let wallet = get_wallet().await?; // TODO: Take wallet as an argument instead of fetching it here
-    let wallet_address = wallet.default_signer().address();
+    // ========= Fetch Router =======
 
     let router_address = address!("0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3");
     let router_provider = get_provider().await?;
