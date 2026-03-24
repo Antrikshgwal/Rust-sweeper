@@ -1,6 +1,6 @@
 use alloy::{
-    primitives::{address, Address, utils::format_units, U256},
-    providers::{ProviderBuilder, Provider},
+    primitives::{address, Address, U256},
+    providers::{Provider},
     sol,
 };
 use eyre::Result;

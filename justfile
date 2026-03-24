@@ -13,6 +13,3 @@ deploy network contract *args:
           --private-key $PRIVATE_KEY \
            --broadcast \
         --constructor-args {{args}}
-
-verify 
-

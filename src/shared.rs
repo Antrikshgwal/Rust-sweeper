@@ -1,9 +1,8 @@
 use alloy::{
     network::EthereumWallet,
-    primitives::{address, Address, utils::format_units, U256},
+    primitives::{Address},
     providers::{ProviderBuilder, Provider},
     signers::local::PrivateKeySigner,
-    sol,
 };
 use eyre::Result;
 use std::env;
@@ -19,17 +18,12 @@ pub struct Token {
 pub async fn get_provider() -> Result<impl Provider> {
     dotenv().ok();
     let rpc_url = env::var("SEPOLIA_RPC_URL")?.parse()?;
-    let provider = ProviderBuilder::new().connect_http(rpc_url);
-    Ok(provider)
-
-}
-
-pub async fn get_wallet() -> Result<EthereumWallet> {
-    dotenv().ok();
     let private_key = env::var("PRIVATE_KEY")?;
     let signer: PrivateKeySigner = private_key.parse()?;
     let wallet = EthereumWallet::from(signer);
-    Ok(wallet)
+    let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url);
+    Ok(provider)
+
 }
 
 pub fn get_token_list() -> Result<Vec<Token>> {
@@ -52,10 +46,10 @@ token_list.push(Token {
 Ok(token_list)
 }
 
-pub async fn get_default()-> Result<Token> {
-    let tokens = get_token_list()?;
-    let default_token = tokens.into_iter().find(|t| t.name == "USDC").ok_or_else(|| eyre::eyre!("Default token not found"))?;
-    Ok(default_token)
-}
+// pub async fn get_default()-> Result<Token> {
+//     let tokens = get_token_list()?;
+//     let default_token = tokens.into_iter().find(|t| t.name == "USDC").ok_or_else(|| eyre::eyre!("Default token not found"))?;
+//     Ok(default_token)
+// }
 
 

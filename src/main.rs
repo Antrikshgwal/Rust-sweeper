@@ -1,5 +1,4 @@
-use crate::shared::Token;
-use clap::{Parser, Subcommand};
+use clap::{Parser};
 
 mod cli;
 mod get_balance;

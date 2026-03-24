@@ -1,13 +1,12 @@
 use alloy::{
-    primitives::{Address, U256, address, Bytes},
+    primitives::{Address, U256, address},
     sol,
-    sol_types::SolCall
 };
 use dotenv::dotenv;
 use eyre::Result;
-use crate::shared::{get_provider, get_wallet, Token};
+use crate::shared::{Token, get_provider};
 
-use crate::get_balance::{get_token_balance, get_wallet_balance};
+use crate::get_balance::{get_wallet_balance};
 
 sol! {
     #[sol(rpc)]
@@ -31,6 +30,7 @@ sol! {
     #[sol(rpc)]
     contract IERC20 {
         function approve(address spender, uint256 amount) external returns (bool);
+        function allowance(address owner, address spender) external view returns (uint256);
     }
     #[sol(rpc)]
     contract Multicall3 {
@@ -49,93 +49,62 @@ sol! {
             external payable
             returns (Result[] memory returnData);
     }
+
+     #[sol(rpc)]
+    contract DustSweeper {
+        function sweep(address target, address[] calldata tokens, uint256[] calldata amounts) external;
+    }
 }
+pub async fn swap_all(
+    user_addr: Address,
+    target_token: Token,
+) -> Result<()> {
+    // 1. Setup Provider with Signer
 
+    let mut tokens_to_sweep = Vec::new();
+    let mut amounts_to_sweep = Vec::new();
+    let sweeper_address = address!("0xC04722cA1000111DB683e26b296C9CBEF8ED25E4"); // Deployed Sweeper contract on Sepolia
 
-pub async fn swap_all(wallet_address: Address, target_token: Token) -> Result<()> {
-    dotenv().ok();
-
-    let router_address = address!("0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3"); // Sepolia V2 Router
-    let multicall_address = address!("0xcA11bde05977b3631167028862bE2a173976CA11"); // Multicall3
-
-    // Get all token balances
-    let balances = get_wallet_balance(wallet_address).await?;
-
-    // Filter out zero balances and target token
-    let dust_tokens: Vec<(Token, U256)> = balances
+    let dust_tokens = get_wallet_balance(user_addr).await?
         .into_iter()
         .filter(|(token, balance)| {
             *balance > U256::ZERO && token.address != target_token.address
         })
-        .collect();
+        .map(|(token, balance)| (token.address, balance))
+        .collect::<Vec<(Address, U256)>>();
+    // 2. Check Allowances & Handle Approvals
+    for (token_addr, balance) in dust_tokens {
+        let provider = get_provider().await?;
+        let token = IERC20::new(token_addr, provider);
+        let current_allowance = token.allowance(user_addr, sweeper_address).call().await?;
 
-    if dust_tokens.is_empty() {
-        println!("No dust to sweep!");
-        return Ok(());
+        if current_allowance < balance {
+            println!("Approving Sweeper for token {:?}", token_addr);
+            // We use 'send' to broadcast; for better UX, you can wait for receipts in a batch
+            token.approve(sweeper_address, U256::MAX).send().await?.get_receipt().await?;
+        }
+
+        tokens_to_sweep.push(token_addr);
+        amounts_to_sweep.push(balance);
     }
 
-    println!("Found {} tokens to sweep:", dust_tokens.len());
-    for (token, balance) in &dust_tokens {
-        println!("  - {}: {}", token.name, balance);
+    // 3. Execute Atomic Sweep
+    let sweep_provider = get_provider().await?;
+    if !tokens_to_sweep.is_empty() {
+        println!("Executing bulk sweep for {} tokens...", tokens_to_sweep.len());
+        let sweeper = DustSweeper::new(sweeper_address, sweep_provider);
+
+        let tx = sweeper.sweep(target_token.address, tokens_to_sweep, amounts_to_sweep).send().await?;
+        let receipt = tx.get_receipt().await?; // Wait for inclusion
+
+        println!("Sweep successful! Tx Hash: {:?}", receipt.transaction_hash);
     }
-    let multicall_provider = get_provider().await?;
-    let multicall = Multicall3::new(multicall_address, multicall_provider);
-    let mut calls: Vec<Multicall3::Call3> = Vec::new();
-
-    let deadline = U256::from(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() + 1200
-    );
-
-    // Build approve + swap calls for each token
-    for (token, balance) in dust_tokens {
-        println!("\nPreparing {} swap...", token.name);
-
-        // 1. Approve router to spend tokens
-        let approve_call = IERC20::approveCall {
-            spender: router_address,
-            amount: balance,
-        };
-        let approve_calldata = approve_call.abi_encode();
-
-        calls.push(Multicall3::Call3 {
-            target: token.address,
-            allowFailure: false,
-            callData: Bytes::from(approve_calldata),
-        });
-
-        // 2. Swap tokens
-        let path = vec![token.address, target_token.address];
-        let swap_call = IUniswapV2Router02::swapExactTokensForTokensCall {
-            amountIn: balance,
-            amountOutMin: U256::ZERO, // TODO: Add slippage protection
-            path,
-            to: wallet_address,
-            deadline,
-        };
-        let swap_calldata = swap_call.abi_encode();
-
-        calls.push(Multicall3::Call3 {
-            target: router_address,
-            allowFailure: false,
-            callData: Bytes::from(swap_calldata),
-        });
-    }
-
-    println!("\n Executing {} operations in one transaction...", calls.len());
-
-    // Execute all in ONE transaction
-    let tx = multicall.aggregate3(calls).send().await?;
-    let receipt = tx.get_receipt().await?;
-
-    println!("\n Batched sweep complete!");
-    println!(" Transaction: {:?}", receipt.transaction_hash);
-    println!(" Gas used: {}", receipt.gas_used);
 
     Ok(())
 }
-pub async fn swap(wallet_address: Address, token_in: Token, token_out: Token) -> Result<String> {
+
+
+pub async fn swap(wallet_address: Address, token_balance: U256, token_in: Token, token_out: Token) -> Result<String> {
     dotenv().ok();
 
     // ========= Fetch Router =======
@@ -143,9 +112,6 @@ pub async fn swap(wallet_address: Address, token_in: Token, token_out: Token) ->
     let router_address = address!("0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3");
     let router_provider = get_provider().await?;
     let router = IUniswapV2Router02::new(router_address, router_provider);
-
-    // Get current balance
-    let token_balance = get_token_balance(&token_in, wallet_address).await?;
 
     // ========= Token Approval ========
 

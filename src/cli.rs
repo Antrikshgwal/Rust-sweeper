@@ -42,6 +42,10 @@ pub enum Commands {
         #[arg(value_name = "WALLET_ADDRESS")]
         wallet_address: String,
 
+    /// Amount to swap (in token's smallest unit, e.g., 1000000 for 1 USDC)
+        #[arg(short, long)]
+        amount: U256,
+
         /// Token symbol to swap from (e.g., WETH, USDT)
         #[arg(short, long)]
         from: String,
@@ -85,7 +89,7 @@ pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
             }
         }
 
-        Commands::Swap { wallet_address, from, to } => {
+        Commands::Swap { wallet_address, amount, from, to } => {
             let addr: Address = wallet_address.parse()
                 .map_err(|_| eyre::eyre!("Invalid wallet address: {}", wallet_address))?;
 
@@ -95,8 +99,8 @@ pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
             println!("Wallet: {}", addr);
             println!("Chain: {}", cli.chain);
             println!("Swapping {} → {}\n", token_in.name, token_out.name);
-
-            swap(addr, token_in, token_out).await?;
+            
+            swap(addr, amount, token_in, token_out).await?;
         }
 
         Commands::Sweep { wallet_address, to } => {
