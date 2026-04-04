@@ -19,7 +19,7 @@ export function Broom() {
     });
 
     return (
-        <group ref={group} scale={[0.5, 0.5, 0.5]} rotation={[0, 0, Math.PI / 4]}>
+        <group ref={group} scale={[3, 3, 3]} rotation={[0.3, 0, Math.PI / 4]}>
             <primitive object={scene} />
         </group>
     );

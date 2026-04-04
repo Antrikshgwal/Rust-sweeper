@@ -39,22 +39,21 @@ export const Sweep = () => {
 
             // 2. Handle Approvals
             for (const approval of plan.approvals_needed) {
-                const tokenContract = new ethers.Contract(
-                    approval.token_address,
-                    ['function approve(address spender, uint256 amount) returns (bool)'],
-                    signer
-                );
-                const approveTx = await tokenContract.approve(approval.spender, approval.amount);
+                const approveTx = await signer.sendTransaction({
+                    to: approval.token_address,
+                    data: new ethers.Interface(['function approve(address spender, uint256 amount)'])
+                        .encodeFunctionData('approve', [approval.spender, approval.amount]),
+                    gasLimit: BigInt(100000),
+                });
                 await approveTx.wait();
             }
 
             // 3. Sign and Broadcast Sweep Transaction
-            const tx = {
+            const txResponse = await signer.sendTransaction({
                 to: plan.to,
                 data: plan.calldata,
-            };
-
-            const txResponse = await signer.sendTransaction(tx);
+                gasLimit: BigInt(500000),
+            });
             const receipt = await txResponse.wait();
             setTxHash(receipt?.hash ?? null);
 
@@ -94,9 +93,10 @@ export const Sweep = () => {
 
                 {loading && (
                     <div className="w-full h-64 mt-4">
-                        <Canvas camera={{ position: [0, 0, 5], fov: 50 }}>
-                            <ambientLight intensity={0.8} />
-                            <directionalLight position={[10, 10, 5]} intensity={1} />
+                        <Canvas camera={{ position: [0, 0, 7], fov: 50 }}>
+                            <ambientLight intensity={1.5} />
+                            <directionalLight position={[5, 5, 5]} intensity={2} />
+                            <directionalLight position={[-5, -3, 3]} intensity={1} />
                             <Broom />
                         </Canvas>
                     </div>

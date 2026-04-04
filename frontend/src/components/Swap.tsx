@@ -47,6 +47,7 @@ export const Swap = () => {
                 const approvalTxResponse = await signer.sendTransaction({
                     to: swapData.approval_to,
                     data: swapData.approval_calldata,
+                    gasLimit: BigInt(100000),
                 });
                 await approvalTxResponse.wait();
             }
@@ -55,6 +56,7 @@ export const Swap = () => {
             const txResponse = await signer.sendTransaction({
                 to: swapData.to,
                 data: swapData.calldata,
+                gasLimit: BigInt(500000),
             });
             const receipt = await txResponse.wait();
             setTxHash(receipt?.hash ?? null);
