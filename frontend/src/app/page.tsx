@@ -1,6 +1,7 @@
 import { Header } from "@/components/Header";
 import { TokenBalances } from "@/components/TokenBalances";
 import { Sweep } from "@/components/Sweep";
+import { Swap } from "@/components/Swap";
 
 export default function Home() {
   return (
@@ -9,6 +10,7 @@ export default function Home() {
       <main className="flex-1 flex flex-col items-center p-8">
         <TokenBalances />
         <Sweep />
+        <Swap />
       </main>
     </div>
   );

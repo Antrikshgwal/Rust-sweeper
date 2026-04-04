@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/contexts/WalletContext';
 import { ethers } from 'ethers';
 import { TokenBalance } from '@/lib/types';
@@ -10,80 +10,92 @@ export const TokenBalances = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        const fetchBalances = async () => {
-            if (!address) return;
+    const fetchBalances = useCallback(async () => {
+        if (!address) return;
 
-            setLoading(true);
-            setError(null);
+        setLoading(true);
+        setError(null);
 
-            try {
-                const response = await fetch('http://localhost:3001/scan', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ wallet_address: address }),
-                });
+        try {
+            const response = await fetch('http://localhost:3001/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wallet_address: address }),
+            });
 
-                if (!response.ok) {
-                    throw new Error('Failed to fetch balances');
-                }
+            if (!response.ok) throw new Error('Failed to fetch balances');
 
-                const data = await response.json();
-                setBalances(data.balances);
-            } catch (err: any) {
-                setError(err.message);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchBalances();
+            const data = await response.json();
+            setBalances(data.balances);
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
     }, [address]);
 
-    if (!address) {
-        return null;
-    }
+    useEffect(() => {
+        fetchBalances();
+    }, [fetchBalances]);
 
-    if (loading) {
-        return <p>Loading balances...</p>;
-    }
-
-    if (error) {
-        return <p className="text-red-500">Error: {error}</p>;
-    }
+    if (!address) return null;
 
     return (
         <div className="w-full max-w-4xl mt-8">
-            <h2 className="text-2xl font-bold mb-4">Token Balances</h2>
+            <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold">Token Balances</h2>
+                <button
+                    onClick={fetchBalances}
+                    disabled={loading}
+                    className="px-4 py-1.5 text-sm bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 flex items-center gap-2"
+                >
+                    {loading
+                        ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Refreshing...</>
+                        : '↻ Refresh'
+                    }
+                </button>
+            </div>
+
             <div className="bg-gray-800 rounded-lg shadow-lg">
-                <table className="w-full text-left">
-                    <thead>
-                        <tr>
-                            <th className="p-4">Token</th>
-                            <th className="p-4">Balance</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {balances.length > 0 ? (
-                            balances.map((token) => (
-                                <tr key={token.address} className="border-t border-gray-700">
-                                    <td className="p-4">{token.name}</td>
-                                    <td className="p-4">
-                                        {ethers.formatUnits(token.balance, token.decimals)}
+                {error && (
+                    <div className="p-4 text-red-400 flex items-center justify-between">
+                        <span>Error: {error}</span>
+                        <button onClick={fetchBalances} className="text-sm underline">Retry</button>
+                    </div>
+                )}
+
+                {!error && (
+                    <table className="w-full text-left">
+                        <thead>
+                            <tr className="border-b border-gray-700">
+                                <th className="p-4 text-gray-400 font-medium">Token</th>
+                                <th className="p-4 text-gray-400 font-medium">Address</th>
+                                <th className="p-4 text-gray-400 font-medium text-right">Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {balances.length > 0 ? (
+                                balances.map((token) => (
+                                    <tr key={token.address} className="border-t border-gray-700 hover:bg-gray-750">
+                                        <td className="p-4 font-medium">{token.name}</td>
+                                        <td className="p-4 text-gray-400 text-sm font-mono">
+                                            {token.address.slice(0, 6)}...{token.address.slice(-4)}
+                                        </td>
+                                        <td className="p-4 text-right tabular-nums">
+                                            {ethers.formatUnits(token.balance, token.decimals)}
+                                        </td>
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr>
+                                    <td colSpan={3} className="p-4 text-center text-gray-400">
+                                        {loading ? 'Loading...' : 'No token balances found.'}
                                     </td>
                                 </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={2} className="p-4 text-center">
-                                    No tokens found.
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
+                            )}
+                        </tbody>
+                    </table>
+                )}
             </div>
         </div>
     );
