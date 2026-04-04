@@ -1,12 +1,12 @@
+use crate::shared::{Token, get_provider, get_token_list};
 use alloy::{
-    primitives::{address, Address, U256},
-    providers::{Provider},
+    primitives::{Address, U256, address},
+    providers::Provider,
     sol,
 };
 use eyre::Result;
-use crate::shared::{Token, get_provider, get_token_list};
 
-sol!{
+sol! {
     #[sol(rpc)]
     contract ERC20{
     function balanceOf(address owner) public view returns (uint256){}
@@ -45,7 +45,7 @@ pub async fn get_token_balance(token: &Token, target_address: Address) -> Result
 
     // For actual ERC20 tokens
     let contract = ERC20::new(token.address, provider);
-    let balance = contract.balanceOf(target_address).call().await?;
+    let result = contract.balanceOf(target_address).call().await?;
 
-    Ok(balance)
+    Ok(result)
 }

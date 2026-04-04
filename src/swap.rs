@@ -89,12 +89,28 @@ pub async fn get_swap_calldata(
     token_balance: U256,
     token_in: Token,
     token_out: Token,
-) -> Result<(Address, Bytes)> {
+) -> Result<(Address, Bytes, Option<Bytes>)> {
     dotenv().ok();
 
     let router_address = address!("0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3");
     let provider = get_provider().await?;
-    let router = IUniswapV2Router02::new(router_address, provider);
+    let router = IUniswapV2Router02::new(router_address, &provider);
+
+    let token_in_contract = IERC20::new(token_in.address, &provider);
+    let current_allowance = token_in_contract
+        .allowance(wallet_address, router_address)
+        .call()
+        .await?;
+
+    let mut approval_calldata = None;
+    if current_allowance < token_balance {
+        approval_calldata = Some(
+            token_in_contract
+                .approve(router_address, token_balance)
+                .calldata()
+                .clone(),
+        );
+    }
 
     let path = vec![token_in.address, token_out.address];
     let deadline = U256::from(
@@ -115,7 +131,7 @@ pub async fn get_swap_calldata(
         .calldata()
         .clone();
 
-    Ok((router_address, calldata))
+    Ok((router_address, calldata, approval_calldata))
 }
 
 pub async fn broadcast_transaction(signed_tx: Bytes) -> Result<String> {
@@ -123,6 +139,10 @@ pub async fn broadcast_transaction(signed_tx: Bytes) -> Result<String> {
     let signer: PrivateKeySigner = get_signer()?;
     let wallet = EthereumWallet::from(signer);
     let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url);
-    let tx_hash = provider.send_raw_transaction(&signed_tx).await?.get_receipt().await?;
+    let tx_hash = provider
+        .send_raw_transaction(&signed_tx)
+        .await?
+        .get_receipt()
+        .await?;
     Ok(tx_hash.transaction_hash.to_string())
 }
