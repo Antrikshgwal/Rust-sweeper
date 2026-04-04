@@ -91,7 +91,7 @@ pub async fn run_cli(cli: Cli) -> eyre::Result<()> {
 
         Commands::Swap {
             wallet_address,
-            amount,
+            amount: _,
             from,
             to,
         } => {

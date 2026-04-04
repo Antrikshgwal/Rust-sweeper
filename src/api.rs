@@ -1,19 +1,19 @@
+use alloy::primitives::{Address, Bytes, U256};
 use axum::{
+    Router,
     extract::Json,
     http::Method,
     routing::{get, post},
-    Router,
 };
+use eyre::Result;
 use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
-use alloy::primitives::{Address, U256, Bytes};
-use eyre::Result;
 
+use crate::swap::{broadcast_transaction, get_swap_all_calldata, get_swap_calldata};
 use crate::{
     get_balance::get_wallet_balance,
     shared::{Token, get_token_list},
 };
-use crate::swap::{get_swap_calldata, get_swap_all_calldata, broadcast_transaction};
 
 #[derive(Deserialize)]
 pub struct ScanRequest {
@@ -43,6 +43,8 @@ pub struct ScanResponse {
 pub struct SwapResponse {
     to: String,
     calldata: String,
+    approval_calldata: Option<String>,
+    approval_to: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -77,13 +79,14 @@ pub struct BroadcastResponse {
 }
 
 // Scan endpoint - returns token balances
-async fn scan_handler(
-    Json(payload): Json<ScanRequest>,
-) -> Result<Json<ScanResponse>, String> {
-    let wallet_address: Address = payload.wallet_address.parse()
+async fn scan_handler(Json(payload): Json<ScanRequest>) -> Result<Json<ScanResponse>, String> {
+    let wallet_address: Address = payload
+        .wallet_address
+        .parse()
         .map_err(|_| "Invalid wallet address".to_string())?;
 
-    let balances = get_wallet_balance(wallet_address).await
+    let balances = get_wallet_balance(wallet_address)
+        .await
         .map_err(|e| format!("Failed to get balances: {}", e))?;
 
     let token_balances: Vec<TokenBalance> = balances
@@ -100,14 +103,13 @@ async fn scan_handler(
         balances: token_balances,
     }))
 }
-async fn swap_handler(
-    Json(payload): Json<SwapRequest>,
-) -> Result<Json<SwapResponse>, String> {
-    let wallet_address: Address = payload.wallet_address.parse()
+async fn swap_handler(Json(payload): Json<SwapRequest>) -> Result<Json<SwapResponse>, String> {
+    let wallet_address: Address = payload
+        .wallet_address
+        .parse()
         .map_err(|_| "Invalid wallet address".to_string())?;
 
-    let tokens = get_token_list()
-        .map_err(|e| format!("Failed to get token list: {}", e))?;
+    let tokens = get_token_list().map_err(|e| format!("Failed to get token list: {}", e))?;
 
     let token_in = tokens
         .iter()
@@ -121,33 +123,42 @@ async fn swap_handler(
         .ok_or_else(|| "Output token not found".to_string())?
         .clone();
 
-    let amount_in: U256 = payload.amount_in.parse()
+    let amount_in: U256 = payload
+        .amount_in
+        .parse()
         .map_err(|_| "Invalid amount".to_string())?;
 
-    let (to, calldata) = get_swap_calldata(wallet_address, amount_in, token_in.clone(), token_out.clone()).await
-        .map_err(|e| format!("Swap failed: {}", e))?;
+    let (to, calldata, approval_calldata) = get_swap_calldata(
+        wallet_address,
+        amount_in,
+        token_in.clone(),
+        token_out.clone(),
+    )
+    .await
+    .map_err(|e| format!("Swap failed: {}", e))?;
 
     Ok(Json(SwapResponse {
         to: to.to_string(),
         calldata: calldata.to_string(),
+        approval_calldata: approval_calldata.as_ref().map(|d| d.to_string()),
+        approval_to: approval_calldata.map(|_| token_in.address.to_string()),
     }))
 }
 // Sweep endpoint - returns data needed for frontend to execute sweep
-async fn sweep_handler(
-    Json(payload): Json<SweepRequest>,
-) -> Result<Json<SweepResponse>, String> {
-    use crate::swap::IERC20;
+async fn sweep_handler(Json(payload): Json<SweepRequest>) -> Result<Json<SweepResponse>, String> {
     use crate::shared::get_provider;
+    use crate::swap::IERC20;
     use alloy::primitives::address;
 
-    let wallet_address: Address = payload.wallet_address.parse()
+    let wallet_address: Address = payload
+        .wallet_address
+        .parse()
         .map_err(|_| "Invalid wallet address".to_string())?;
 
     let sweeper_address = address!("0xC04722cA1000111DB683e26b296C9CBEF8ED25E4");
 
     // Find target token
-    let tokens = get_token_list()
-        .map_err(|e| format!("Failed to get token list: {}", e))?;
+    let tokens = get_token_list().map_err(|e| format!("Failed to get token list: {}", e))?;
 
     let target_token = tokens
         .iter()
@@ -156,19 +167,19 @@ async fn sweep_handler(
         .clone();
 
     // Get dust tokens
-    let dust_tokens = get_wallet_balance(wallet_address).await
+    let dust_tokens = get_wallet_balance(wallet_address)
+        .await
         .map_err(|e| format!("Failed to get balances: {}", e))?
         .into_iter()
-        .filter(|(token, balance)| {
-            *balance > U256::ZERO && token.address != target_token.address
-        })
+        .filter(|(token, balance)| *balance > U256::ZERO && token.address != target_token.address)
         .collect::<Vec<(Token, U256)>>();
 
     let mut approvals_needed = Vec::new();
 
     // Check allowances
     for (token, balance) in &dust_tokens {
-        let provider = get_provider().await
+        let provider = get_provider()
+            .await
             .map_err(|e| format!("Provider error: {}", e))?;
         let token_contract = IERC20::new(token.address, provider);
 
@@ -188,7 +199,8 @@ async fn sweep_handler(
         }
     }
 
-    let (to, calldata) = get_swap_all_calldata(wallet_address, target_token.clone()).await
+    let (to, calldata) = get_swap_all_calldata(wallet_address, target_token.clone())
+        .await
         .map_err(|e| format!("Failed to get calldata: {}", e))?;
 
     Ok(Json(SweepResponse {
@@ -201,10 +213,13 @@ async fn sweep_handler(
 async fn broadcast_handler(
     Json(payload): Json<BroadcastRequest>,
 ) -> Result<Json<BroadcastResponse>, String> {
-    let signed_tx: Bytes = payload.signed_tx.parse()
+    let signed_tx: Bytes = payload
+        .signed_tx
+        .parse()
         .map_err(|_| "Invalid signed transaction".to_string())?;
 
-    let tx_hash = broadcast_transaction(signed_tx).await
+    let tx_hash = broadcast_transaction(signed_tx)
+        .await
         .map_err(|e| format!("Failed to broadcast transaction: {}", e))?;
 
     Ok(Json(BroadcastResponse { tx_hash }))
